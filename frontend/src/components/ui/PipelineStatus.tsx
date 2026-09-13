@@ -2,8 +2,6 @@
  * Parse pipeline status indicator — shows which of the 5 AI stages ran.
  * Displayed after protocol parsing to build trust in the AI output.
  */
-import type { ParseResponse } from '../../types'
-
 interface PipelineStatusProps {
   parseMethod: string
   warnings: string[]
@@ -20,8 +18,6 @@ const STAGES = [
 
 export function PipelineStatus({ parseMethod, warnings }: PipelineStatusProps) {
   const isDatabricks = parseMethod === 'llm_databricks'
-  const isText = parseMethod === 'llm_rest_text' || parseMethod === 'llm_rest'
-  const isLocal = parseMethod === 'llm_rest_local'
 
   return (
     <div

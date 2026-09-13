@@ -41,7 +41,6 @@ function GenerateBody() {
   const selectedConds  = useStore((s) => s.selectedConditions)
   const allConds       = useStore(selAllConditions)
   const studyWindow    = useStore((s) => s.studyWindow)
-  const dbxUser        = useStore((s) => s.dbxUser)
   const dbxConnected   = useStore((s) => s.dbxConnected)
   const dbxNotebookRoot = useStore((s) => s.dbxNotebookRoot)
   const isGenerating   = useStore((s) => s.isGenerating)

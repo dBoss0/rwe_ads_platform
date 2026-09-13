@@ -428,8 +428,6 @@ function ExistingCodeLists() {
 
   if (!codeLists.length) return null
 
-  const selectedSet = new Set(selectedConditions ?? allConditions)
-
   const toggleExpand = (key: string) => setExpanded((p) => ({ ...p, [key]: !p[key] }))
 
   const totalCodes    = codeLists.length
