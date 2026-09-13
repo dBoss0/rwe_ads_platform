@@ -33,10 +33,18 @@ class Settings(BaseSettings):
     # ── Volume paths (under the scratch catalog) ───────────────────────────────
     protocol_volume: str = os.environ.get(
         "PROTOCOL_VOLUME",
-        "/Volumes/rhealth-catalog-poc/scratch_mtech_ga_dbx_prphd_ads_automation_poc/protocols",
+        "/Volumes/rhealth-catalog-poc/scratch_mtech_ga_dbx_prphd_ads_automation_poc/ads_automation",
     )
 
     # ── Runtime flags ─────────────────────────────────────────────────────────
+    # ── Notebook workspace root ───────────────────────────────────────────────
+    # All generated SQL notebooks land here.
+    # /Shared/ads_automation/ is accessible to all team members regardless
+    # of who runs the Databricks App.
+    notebook_workspace_root: str = os.environ.get(
+        "NOTEBOOK_WORKSPACE_ROOT", "/Shared/ads_automation"
+    )
+
     @property
     def meta_fqn_sql(self) -> str:
         """

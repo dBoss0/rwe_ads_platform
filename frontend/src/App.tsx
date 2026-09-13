@@ -20,7 +20,14 @@ export default function App() {
   // On mount: probe health endpoint to detect Databricks context
   useEffect(() => {
     checkHealth()
-      .then((h) => setDbxStatus(h.databricks_connected, h.user ?? '', h.is_databricks_app))
+      .then((h) =>
+        setDbxStatus(
+          h.databricks_connected,
+          h.user ?? '',
+          h.is_databricks_app,
+          h.notebook_workspace_root,
+        ),
+      )
       .catch(() => setDbxStatus(false, '', false))
   }, [setDbxStatus])
 

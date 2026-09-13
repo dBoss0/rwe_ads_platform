@@ -9,6 +9,7 @@
  *   - Meta strip shows study title and data sources
  */
 import { useStore, selInclusionCount, selExclusionCount, selTotalCount } from '../../store/useStore'
+import { PipelineStatus } from '../ui/PipelineStatus'
 
 export function Step2Edit() {
   const steps      = useStore((s) => s.steps)
@@ -81,6 +82,11 @@ export function Step2Edit() {
           </span>
         </div>
       </div>
+
+      {/* AI pipeline status */}
+      {inputMode !== 'manual' && (
+        <PipelineStatus parseMethod={parseMethod} warnings={[]} summary={summary} />
+      )}
 
       {/* AI summary */}
       {summary && (

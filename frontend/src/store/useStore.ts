@@ -36,6 +36,7 @@ interface AppState {
   dbxConnected: boolean;
   dbxUser: string;
   dbxIsDatabricksApp: boolean;
+  dbxNotebookRoot: string;   // /Shared/ads_automation — team-wide notebook folder
 
   // UI loading flags
   isParsing: boolean;
@@ -75,7 +76,7 @@ interface AppState {
   setNotebookResult: (sql: string, url: string, warnings: string[]) => void;
 
   // Databricks
-  setDbxStatus: (connected: boolean, user: string, isApp: boolean) => void;
+  setDbxStatus: (connected: boolean, user: string, isApp: boolean, notebookRoot?: string) => void;
 
   // Loading
   setIsParsing: (v: boolean) => void;
@@ -108,6 +109,7 @@ export const useStore = create<AppState>((set) => ({
   dbxConnected: false,
   dbxUser: '',
   dbxIsDatabricksApp: false,
+  dbxNotebookRoot: '/Shared/ads_automation',
 
   isParsing: false,
   isGenerating: false,
@@ -195,8 +197,13 @@ export const useStore = create<AppState>((set) => ({
     set({ notebookSql: sql, notebookUrl: url, notebookWarnings: warnings }),
 
   // Databricks
-  setDbxStatus: (connected, user, isApp) =>
-    set({ dbxConnected: connected, dbxUser: user, dbxIsDatabricksApp: isApp }),
+  setDbxStatus: (connected, user, isApp, notebookRoot) =>
+    set({
+      dbxConnected: connected,
+      dbxUser: user,
+      dbxIsDatabricksApp: isApp,
+      ...(notebookRoot ? { dbxNotebookRoot: notebookRoot } : {}),
+    }),
 
   // Loading
   setIsParsing: (v) => set({ isParsing: v }),

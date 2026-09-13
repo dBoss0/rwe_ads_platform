@@ -43,6 +43,7 @@ function GenerateBody() {
   const studyWindow    = useStore((s) => s.studyWindow)
   const dbxUser        = useStore((s) => s.dbxUser)
   const dbxConnected   = useStore((s) => s.dbxConnected)
+  const dbxNotebookRoot = useStore((s) => s.dbxNotebookRoot)
   const isGenerating   = useStore((s) => s.isGenerating)
   const setIsGenerating = useStore((s) => s.setIsGenerating)
   const notebookSql    = useStore((s) => s.notebookSql)
@@ -57,7 +58,8 @@ function GenerateBody() {
 
   // Auto-populate workspace path from title + dbxUser
   const safeTitle = title.replace(/[^a-zA-Z0-9]+/g, '_').slice(0, 60) || 'study'
-  const defaultPath = `/Users/${dbxUser || 'me'}/ads_automation/${safeTitle}_attrition`
+  // All notebooks → /Shared/ads_automation/ so entire team can access them
+  const defaultPath = `${dbxNotebookRoot}/${safeTitle}_attrition`
 
   useEffect(() => {
     if (!storedPath) setNotebookPath(defaultPath)

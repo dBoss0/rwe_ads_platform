@@ -107,4 +107,5 @@ export interface HealthResponse {
   is_databricks_app: boolean;
   user?: string;
   version: string;
+  notebook_workspace_root?: string;
 }

@@ -27,4 +27,5 @@ async def health():
         "version": "2.0.0",
         "phd_catalog": settings.phd_fqn,
         "claude_endpoint": settings.claude_endpoint,
+        "notebook_workspace_root": settings.notebook_workspace_root,
     }
