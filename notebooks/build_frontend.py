@@ -119,25 +119,14 @@ for f in files:
 
 # COMMAND ----------
 
-# Configure git identity
-run(f'git config user.email "dr20@its.jnj.com"', cwd=REPO_ROOT)
-run(f'git config user.name "DR20"', cwd=REPO_ROOT)
-
-# Stage built dist
-run("git add frontend/dist/", cwd=REPO_ROOT)
-run("git add app.yaml requirements.txt", cwd=REPO_ROOT)
-
-# Commit (ok if nothing new to commit)
-r = subprocess.run(
-    'git commit -m "Build: compiled React frontend dist"',
-    shell=True, cwd=REPO_ROOT, capture_output=True, text=True
-)
-print(r.stdout or r.stderr)
-
-# Push
-rc = run("git push origin master", cwd=REPO_ROOT)
-assert rc == 0, "git push failed — check Git Folder credentials in Databricks"
-print("✓ Pushed dist to GitHub")
+# NOTE: subprocess git commands do not work on Databricks workspace Git folders
+# (the .git directory is managed at the workspace layer, not on disk).
+# Use the Databricks Git UI or the workspace Git API to commit and push instead:
+#   1. Open the Git modal for this repo in the Databricks UI
+#   2. Or use the Databricks Assistant's runGit tool
+print("⚠️  Skipping subprocess git — use the Databricks Git UI to commit & push.")
+print(f"   Repo: {REPO_ROOT}")
+print("   Files to commit: frontend/dist/, app.yaml, requirements.txt")
 
 # COMMAND ----------
 
