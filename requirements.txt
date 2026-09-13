@@ -1,21 +1,9 @@
-# Web framework
+# All packages below are pre-installed in the Databricks Apps runtime.
+# No PyPI access from the Apps container — only list what's already there.
+
 fastapi>=0.115.0
 uvicorn>=0.30.0
 python-multipart>=0.0.9
-
-# HTTP
 requests>=2.32.0
 httpx>=0.27.0
-
-# Data models — pydantic already on Databricks Apps runtime, relax pin
 pydantic>=2.10.0,<3.0.0
-pydantic-settings>=2.6.0,<3.0.0
-
-# Document parsing (local fallback — Databricks uses ai_parse_document natively)
-python-docx>=1.1.0
-
-# Env config
-python-dotenv>=1.0.0
-
-# Databricks SDK — already present in Apps runtime, listed for local dev only
-databricks-sdk>=0.32.0
