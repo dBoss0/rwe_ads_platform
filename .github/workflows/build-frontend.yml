@@ -1,6 +1,7 @@
 name: Build React Frontend
 
 on:
+  workflow_dispatch:   # manual trigger from GitHub Actions UI
   push:
     branches: [master]
     paths:
