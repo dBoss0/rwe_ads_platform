@@ -78,7 +78,29 @@ if FRONTEND_DIST.exists():
         index = FRONTEND_DIST / "index.html"
         return FileResponse(str(index))
 else:
-    logger.warning(
-        "frontend/dist not found — React build missing. "
-        "Run: cd frontend && npm install && npm run build"
-    )
+    logger.warning("frontend/dist not found — React build missing.")
+
+    from fastapi.responses import HTMLResponse
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def no_frontend(full_path: str):
+        return HTMLResponse("""
+<!DOCTYPE html><html><head><title>RWE ADS Platform</title>
+<style>body{font-family:sans-serif;background:#1a1410;color:#f0ebe6;
+display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}
+.box{text-align:center;}.tag{background:#eb1700;color:#fff;font-size:.7rem;
+font-weight:700;letter-spacing:.15em;padding:4px 12px;border-radius:4px;
+text-transform:uppercase;}.h{font-size:1.8rem;font-weight:900;margin:1rem 0 .5rem;}
+.sub{color:#81766f;font-size:.85rem;}.code{font-family:monospace;background:#2a2420;
+padding:.8rem 1.2rem;border-radius:8px;border-left:3px solid #eb1700;
+margin:1.2rem auto;max-width:500px;text-align:left;font-size:.8rem;color:#69d0ff;}
+</style></head><body><div class="box">
+<div class="tag">RWE ADS Platform</div>
+<div class="h">Frontend build missing</div>
+<div class="sub">The app is running. The React UI just needs to be built once.</div>
+<div class="code">In Databricks:<br>
+1. Open <b>notebooks/build_frontend</b><br>
+2. Attach to any cluster → <b>Run All</b><br>
+3. Redeploy this app when it finishes</div>
+<div class="sub">API is live at <a href="/api/docs" style="color:#eb1700">/api/docs</a></div>
+</div></body></html>""", status_code=200)
