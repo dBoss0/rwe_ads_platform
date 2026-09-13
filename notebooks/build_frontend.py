@@ -1,8 +1,12 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # MAGIC %md
-# MAGIC # Build React Frontend
-# MAGIC Run this notebook once on any cluster to compile the React UI into `frontend/dist/`.
-# MAGIC After this cell finishes, the Databricks App can serve the built UI.
+# MAGIC # Build React Frontend & Push to GitHub
+# MAGIC Run this notebook once on any cluster to compile the React UI into `frontend/dist/`
+# MAGIC and push it to GitHub so the Databricks App can serve it.
 
 # COMMAND ----------
 
@@ -48,12 +52,20 @@ print(f"\n✓ node: {node_ok}   ✓ npm: {npm_ok}")
 
 # COMMAND ----------
 
-if not node_ok:
-    print("Node not found — installing via nvm...")
-    run("curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash")
-    run('export NVM_DIR="$HOME/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && nvm install 20 && nvm use 20')
+# DBTITLE 1,Cell 6
+import shutil as _shutil
+
+if not node_ok or not npm_ok:
+    print("Node/npm not fully available — installing via nodeenv...")
+    _ndir = "/tmp/_nodeenv"
+    rc = run(f"python -m nodeenv --node=20.18.0 --force {_ndir}")
+    assert rc == 0, "nodeenv install failed — check cluster internet access"
+    os.environ["PATH"] = f"{_ndir}/bin:{os.environ['PATH']}"
+
     node_ok = run("node --version") == 0
-    print(f"Node installed: {node_ok}")
+    npm_ok = run("npm --version") == 0
+    print(f"✓ node: {node_ok}   ✓ npm: {npm_ok}")
+    assert node_ok and npm_ok, "Failed to install Node.js and npm"
 
 # COMMAND ----------
 
@@ -61,7 +73,18 @@ if not node_ok:
 
 # COMMAND ----------
 
-rc = run("npm install --prefer-offline --no-audit --no-fund", cwd=FRONTEND_DIR)
+# DBTITLE 1,Cell 8
+import shutil
+
+# WSFS (/Workspace/) does not support rename() — npm needs it during install.
+# Copy sources to /tmp (a real filesystem), run npm there.
+BUILD_DIR = "/tmp/frontend_build"
+if os.path.isdir(BUILD_DIR):
+    shutil.rmtree(BUILD_DIR)
+shutil.copytree(FRONTEND_DIR, BUILD_DIR, ignore=shutil.ignore_patterns("node_modules", "dist"))
+print(f"📋 Copied frontend → {BUILD_DIR}")
+
+rc = run("npm install --no-audit --no-fund", cwd=BUILD_DIR)
 assert rc == 0, "npm install failed — check output above"
 print("✓ npm install done")
 
@@ -71,9 +94,15 @@ print("✓ npm install done")
 
 # COMMAND ----------
 
-rc = run("npm run build", cwd=FRONTEND_DIR)
+# DBTITLE 1,Cell 10
+rc = run("npm run build", cwd=BUILD_DIR)
 assert rc == 0, "npm run build failed — check output above"
-print("✓ Build complete")
+
+# Copy dist/ back to workspace (overwrite in-place, no delete)
+dist_src = os.path.join(BUILD_DIR, "dist")
+dist_dst = os.path.join(FRONTEND_DIR, "dist")
+shutil.copytree(dist_src, dist_dst, dirs_exist_ok=True)
+print(f"✓ Build complete — dist/ copied to {dist_dst}")
 
 # COMMAND ----------
 
@@ -86,7 +115,34 @@ for f in files:
 
 # COMMAND ----------
 
+# MAGIC %md ## Step 5 — Commit dist and push to GitHub
+
+# COMMAND ----------
+
+# Configure git identity
+run(f'git config user.email "dr20@its.jnj.com"', cwd=REPO_ROOT)
+run(f'git config user.name "DR20"', cwd=REPO_ROOT)
+
+# Stage built dist
+run("git add frontend/dist/", cwd=REPO_ROOT)
+run("git add app.yaml requirements.txt", cwd=REPO_ROOT)
+
+# Commit (ok if nothing new to commit)
+r = subprocess.run(
+    'git commit -m "Build: compiled React frontend dist"',
+    shell=True, cwd=REPO_ROOT, capture_output=True, text=True
+)
+print(r.stdout or r.stderr)
+
+# Push
+rc = run("git push origin master", cwd=REPO_ROOT)
+assert rc == 0, "git push failed — check Git Folder credentials in Databricks"
+print("✓ Pushed dist to GitHub")
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## ✅ Done!
-# MAGIC The React UI is built. You can now start the Databricks App — it will serve
-# MAGIC the compiled files from `frontend/dist/` automatically.
+# MAGIC `frontend/dist/` is now in GitHub.
+# MAGIC
+# MAGIC **Next:** Go to **Databricks Apps → your app → Redeploy** to pick up the built UI.
