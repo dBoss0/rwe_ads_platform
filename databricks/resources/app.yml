@@ -1,0 +1,6 @@
+resources:
+  apps:
+    rwe-ads-platform:
+      name: rwe-ads-platform
+      description: "RWE ADS Automation Platform — Protocol → Attrition → ADS on Premier PHD"
+      source_code_path: ../..

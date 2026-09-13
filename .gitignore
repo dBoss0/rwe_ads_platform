@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Environment — NEVER commit tokens or secrets
+.env
+.env.local
+*.pat
+*.token
+
+# Node / React
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+
+# Databricks
+.databricks/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+.coverage
+htmlcov/
+
+# Scratchpad
+scratch/
+tmp/

@@ -1,0 +1,17 @@
+bundle:
+  name: rwe-ads-platform
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://dbc-db3d8a4e-f2cf.cloud.databricks.com
+
+  prod:
+    mode: production
+    workspace:
+      host: https://dbc-db3d8a4e-f2cf.cloud.databricks.com
+
+include:
+  - databricks/resources/*.yml
