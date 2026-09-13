@@ -2,18 +2,21 @@
  * Sidebar — New Protocol button, step summary, Databricks connection status,
  * last output path, one-time setup.
  */
+import { useState } from 'react'
 import {
   useStore,
   selInclusionCount,
   selExclusionCount,
   selTotalCount,
 } from '../../store/useStore'
+import { JnJLogo } from '../ui/JnJLogo'
 
 const LOGO_URL =
   'https://play-lh.googleusercontent.com/' +
   'goJEGZ2I1rekFkK_Os2Hq6tgG_Iz07Wy6CyW2ti-Tn-j9_SiFVfAoQ6qKZKRJT-O_znd4tgvOgWK_8uHxWcBOQ'
 
 export function Sidebar() {
+  const [logoFailed, setLogoFailed] = useState(false)
   const resetProtocol  = useStore((s) => s.resetProtocol)
   const steps          = useStore((s) => s.steps)
   const notebookPath   = useStore((s) => s.notebookPath)
@@ -32,12 +35,16 @@ export function Sidebar() {
       <div className="sidebar-content">
         {/* Brand */}
         <div className="sidebar-brand">
-          <img
-            src={LOGO_URL}
-            style={{ height: 36, width: 'auto', marginBottom: 8, display: 'block' }}
-            alt="J&J"
-            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-          />
+          {logoFailed ? (
+            <JnJLogo height={34} variant="icon" />
+          ) : (
+            <img
+              src={LOGO_URL}
+              style={{ height: 36, width: 'auto', marginBottom: 8, display: 'block' }}
+              alt="Johnson & Johnson"
+              onError={() => setLogoFailed(true)}
+            />
+          )}
           <div className="sidebar-brand-name">Code Automation</div>
           <div className="sidebar-brand-sub">Protocol Intelligence Platform</div>
         </div>

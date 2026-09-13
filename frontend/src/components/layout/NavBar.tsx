@@ -1,14 +1,33 @@
-/** Top navigation bar — J&J logo, platform tag, version. */
+/**
+ * Top navigation bar — J&J logo, platform tag, version.
+ * Primary: googleusercontent CDN (official Play Store icon)
+ * Fallback: inline SVG (always renders, even in restricted VDI)
+ */
+import { useState } from 'react'
+import { JnJLogo } from '../ui/JnJLogo'
+
+// Official J&J logo from Google Play Store listing
 const LOGO_URL =
   'https://play-lh.googleusercontent.com/' +
   'goJEGZ2I1rekFkK_Os2Hq6tgG_Iz07Wy6CyW2ti-Tn-j9_SiFVfAoQ6qKZKRJT-O_znd4tgvOgWK_8uHxWcBOQ'
 
 export function NavBar() {
+  const [logoFailed, setLogoFailed] = useState(false)
+
   return (
     <nav className="nav">
       <div className="nav-inner">
         <div className="nav-logo-wrap">
-          <img src={LOGO_URL} className="nav-logo-img" alt="J&J" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+          {logoFailed ? (
+            <JnJLogo height={40} variant="icon" />
+          ) : (
+            <img
+              src={LOGO_URL}
+              className="nav-logo-img"
+              alt="Johnson & Johnson"
+              onError={() => setLogoFailed(true)}
+            />
+          )}
           <div className="nav-logo-divider" />
           <div>
             <div className="nav-logo-text">MedTech</div>
