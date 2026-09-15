@@ -481,6 +481,15 @@ with tab_upload:
                         {"step_type": s.step_type, "description": s.description}
                         for s in result.all_steps
                     ]
+                    if result.warnings:
+                        for w in result.warnings:
+                            st.markdown(f'<div class="jnj-info">⚠ {w}</div>', unsafe_allow_html=True)
+                    if not result.all_steps:
+                        st.markdown(
+                            '<div class="jnj-error"><strong>No criteria extracted.</strong> '
+                            'Check warnings above. Try the Paste Text tab instead.</div>',
+                            unsafe_allow_html=True,
+                        )
                     st.session_state.steps_df = pd.DataFrame(rows, columns=["step_type", "description"])
                     st.rerun()
                 except Exception as e:
@@ -518,6 +527,15 @@ with tab_text:
                         {"step_type": s.step_type, "description": s.description}
                         for s in result.all_steps
                     ]
+                    if result.warnings:
+                        for w in result.warnings:
+                            st.markdown(f'<div class="jnj-info">⚠ {w}</div>', unsafe_allow_html=True)
+                    if not result.all_steps:
+                        st.markdown(
+                            '<div class="jnj-error"><strong>No criteria extracted.</strong> '
+                            'Check warnings above — the model endpoint or warehouse may need attention.</div>',
+                            unsafe_allow_html=True,
+                        )
                     st.session_state.steps_df = pd.DataFrame(rows, columns=["step_type", "description"])
                     st.rerun()
                 except Exception as e:

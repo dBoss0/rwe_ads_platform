@@ -29,6 +29,27 @@ WAREHOUSE_ID: str = settings.warehouse_id
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SQL string escaping helper
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _sql_str(text: str, max_len: int = 50_000) -> str:
+    """
+    Escape text for safe embedding inside a SQL single-quoted string literal.
+    Must handle: backslashes, single quotes, newlines, carriage returns, tabs.
+    Unescaped newlines inside SQL string literals break the statement silently.
+    """
+    return (
+        text[:max_len]
+        .replace("\\", "\\\\")    # backslashes first (must be first)
+        .replace("'",  "\\'")     # single quotes
+        .replace("\r\n", "\\n")   # Windows CRLF
+        .replace("\n",  "\\n")    # Unix LF
+        .replace("\r",  "\\r")    # old Mac CR
+        .replace("\t",  "\\t")    # tabs
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SQL Statement API runner
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -170,8 +191,8 @@ def ai_extract(text: str, schema: dict) -> Optional[dict]:
     Returns:
         Dict of extracted fields, or None on failure.
     """
-    schema_json = json.dumps(schema).replace("'", "\\'")
-    text_escaped = text.replace("'", "\\'")[:30_000]  # 30k char limit for inline SQL
+    schema_json  = _sql_str(json.dumps(schema), 5_000)
+    text_escaped = _sql_str(text, 30_000)
 
     sql = f"""
     SELECT ai_extract(
@@ -217,9 +238,9 @@ def ai_classify_criterion(criterion_text: str) -> str:
 
     Returns the best-matching label from CRITERION_TYPES.
     """
-    labels_json = json.dumps(CRITERION_TYPES)
-    text_escaped = criterion_text.replace("'", "\\'")[:2000]
-    instructions = (
+    labels_json  = _sql_str(json.dumps(CRITERION_TYPES))
+    text_escaped = _sql_str(criterion_text, 2_000)
+    instructions = _sql_str(
         "Classify this clinical attrition criterion by which Premier PHD table "
         "would be used to implement it in SQL. "
         "procedure_code=paticd_proc/patcpt, diagnosis_code=paticd_diag, "
@@ -263,15 +284,15 @@ def ai_classify_batch(criterion_texts: list[str]) -> list[str]:
     if not criterion_texts:
         return []
 
-    labels_json = json.dumps(CRITERION_TYPES).replace("'", "\\'")
-    instructions = (
+    labels_json  = _sql_str(json.dumps(CRITERION_TYPES))
+    instructions = _sql_str(
         "Classify this clinical attrition criterion by which Premier PHD table "
         "would be used to implement it in SQL."
     )
 
-    # Build a VALUES table
+    # Build a VALUES table — each criterion text fully escaped
     vals = ", ".join(
-        f"({i}, '{t[:500].replace(chr(39), chr(39)+chr(39))}')"
+        f"({i}, '{_sql_str(t, 500)}')"
         for i, t in enumerate(criterion_texts)
     )
 
@@ -333,13 +354,12 @@ def ai_query(
     Returns:
         Response text (string), or None on failure.
     """
-    p_esc = prompt.replace("'", "\\'")[:50_000]
+    p_esc = _sql_str(prompt, 50_000)
 
     if system_prompt:
-        # Prepend system instructions into the single prompt string —
-        # compatible with all warehouse DBR versions (no named_struct/array needed)
-        s_esc = system_prompt.replace("'", "\\'")[:15_000]
-        combined = f"{s_esc}\\n\\n---\\n\\n{p_esc}"
+        # Prepend system instructions — compatible with all DBR versions
+        s_esc    = _sql_str(system_prompt, 15_000)
+        combined = s_esc + "\\n\\n---\\n\\n" + p_esc
         sql = f"""
         SELECT ai_query(
             '{endpoint}',
@@ -383,7 +403,7 @@ def ai_summarize(text: str, max_words: int = 150) -> Optional[str]:
     Summarize protocol text using ai_summarize.
     Returns a short summary for display in the UI.
     """
-    text_escaped = text.replace("'", "\\'")[:20_000]
+    text_escaped = _sql_str(text, 20_000)
     sql = f"SELECT ai_summarize('{text_escaped}', {max_words}) AS summary"
     rows = _run_sql(sql, timeout=30)
     return _first_cell(rows, "summary")
@@ -395,7 +415,7 @@ def ai_summarize(text: str, max_words: int = 150) -> Optional[str]:
 
 def ai_gen(prompt: str) -> Optional[str]:
     """General-purpose text generation via ai_gen."""
-    prompt_escaped = prompt.replace("'", "\\'")[:10_000]
+    prompt_escaped = _sql_str(prompt, 10_000)
     sql = f"SELECT ai_gen('{prompt_escaped}') AS result"
     rows = _run_sql(sql, timeout=30)
     return _first_cell(rows, "result")
