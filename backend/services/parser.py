@@ -159,32 +159,75 @@ def parse_protocol(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 1: Local text extraction (dev fallback)
+# Stage 1: Local text extraction (dev fallback — stdlib only, no python-docx)
 # ─────────────────────────────────────────────────────────────────────────────
 
+_WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_W = f"{{{_WORD_NS}}}"
+
+
 def _local_extract_docx(file_path: str) -> str:
+    """
+    Extract plain text from a .docx or .pdf file without external dependencies.
+
+    .docx  → unzip + parse word/document.xml with stdlib xml.etree.ElementTree.
+             Handles paragraphs, headings, and table cells.
+    .pdf   → not supported locally; user is prompted to paste text instead.
+    """
+    import zipfile
+    from xml.etree import ElementTree as ET
+
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"Protocol file not found: {path}")
-    if path.suffix.lower() != ".docx":
-        raise ValueError(f"Local dev mode supports DOCX only (got {path.suffix}).")
+
+    suffix = path.suffix.lower()
+
+    if suffix == ".pdf":
+        raise ValueError(
+            "PDF parsing requires Databricks deployment (ai_parse_document). "
+            "Please paste the protocol text in the 'Paste Text' tab instead."
+        )
+
+    if suffix != ".docx":
+        raise ValueError(
+            f"Unsupported file type '{suffix}'. Upload a .docx file or use the Paste Text tab."
+        )
+
+    # ── Read word/document.xml from the ZIP ───────────────────────────────────
+    lines: list[str] = []
     try:
-        from docx import Document
-        doc = Document(str(path))
-        lines = []
-        for para in doc.paragraphs:
-            t = para.text.strip()
-            if t:
-                lines.append(t)
-        for table in doc.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    t = cell.text.strip()
-                    if t:
-                        lines.append(t)
-        return "\n".join(lines)
-    except ImportError:
-        raise RuntimeError("python-docx not installed. Run: pip install python-docx")
+        with zipfile.ZipFile(str(path), "r") as zf:
+            xml_bytes = zf.read("word/document.xml")
+    except KeyError:
+        raise ValueError("Invalid .docx file — word/document.xml not found inside the archive.")
+
+    root = ET.fromstring(xml_bytes)
+
+    # Paragraphs (covers body text, headings, list items)
+    for para in root.iter(f"{_W}p"):
+        text = "".join(
+            node.text or ""
+            for node in para.iter(f"{_W}t")
+        ).strip()
+        if text:
+            lines.append(text)
+
+    # Table cells (inclusion/exclusion criteria are often in Word tables)
+    for cell in root.iter(f"{_W}tc"):
+        cell_lines: list[str] = []
+        for para in cell.iter(f"{_W}p"):
+            text = "".join(
+                node.text or ""
+                for node in para.iter(f"{_W}t")
+            ).strip()
+            if text:
+                cell_lines.append(text)
+        combined = " ".join(cell_lines).strip()
+        if combined and combined not in lines:
+            lines.append(combined)
+
+    return "\n".join(lines)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

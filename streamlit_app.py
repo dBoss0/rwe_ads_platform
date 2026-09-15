@@ -445,34 +445,46 @@ tab_upload, tab_text, tab_manual = st.tabs([
 with tab_upload:
     uploaded = st.file_uploader("", type=["docx", "pdf"], label_visibility="collapsed")
     if uploaded and st.session_state.steps_df is None:
-        with tempfile.NamedTemporaryFile(suffix=Path(uploaded.name).suffix, delete=False) as tmp:
-            tmp.write(uploaded.read())
-            tmp_path = tmp.name
-        with st.spinner("Parsing protocol with AI pipeline…"):
-            try:
-                if is_databricks_app():
-                    # Upload to UC Volume then parse via ai_parse_document
-                    from backend.services.databricks_client import upload_to_volume
-                    vol_path = f"{settings.protocol_volume}/{uploaded.name}"
-                    upload_to_volume(tmp_path, vol_path)
-                    result = parse_protocol(volume_path=vol_path)
-                else:
-                    result = parse_protocol(local_file_path=tmp_path)
+        file_suffix = Path(uploaded.name).suffix.lower()
 
-                st.session_state.title        = result.title
-                st.session_state.data_sources = result.data_sources
-                st.session_state.study_window = result.study_window or ""
-                st.session_state.parse_method = result.parse_method
-                st.session_state.parse_summary = result.summary or ""
-                st.session_state.input_mode   = "upload"
-                rows = [
-                    {"step_type": s.step_type, "description": s.description}
-                    for s in result.steps
-                ]
-                st.session_state.steps_df = pd.DataFrame(rows, columns=["step_type", "description"])
-                st.rerun()
-            except Exception as e:
-                st.markdown(f'<div class="jnj-error">Parser error: {e}</div>', unsafe_allow_html=True)
+        # PDF requires Databricks; give a clear message instead of a cryptic error
+        if file_suffix == ".pdf" and not is_databricks_app():
+            st.markdown(
+                '<div class="jnj-info">'
+                '<strong>PDF parsing requires Databricks deployment.</strong><br>'
+                'Please copy the protocol text and use the <strong>Paste Text</strong> tab, '
+                'or upload a <code>.docx</code> version of the protocol.'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            with tempfile.NamedTemporaryFile(suffix=file_suffix, delete=False) as tmp:
+                tmp.write(uploaded.read())
+                tmp_path = tmp.name
+            with st.spinner("Parsing protocol with AI pipeline…"):
+                try:
+                    if is_databricks_app():
+                        from backend.services.databricks_client import upload_to_volume
+                        vol_path = f"{settings.protocol_volume}/{uploaded.name}"
+                        upload_to_volume(tmp_path, vol_path)
+                        result = parse_protocol(volume_path=vol_path)
+                    else:
+                        result = parse_protocol(local_file_path=tmp_path)
+
+                    st.session_state.title         = result.title
+                    st.session_state.data_sources  = result.data_sources
+                    st.session_state.study_window  = result.study_window or ""
+                    st.session_state.parse_method  = result.parse_method
+                    st.session_state.parse_summary = result.summary or ""
+                    st.session_state.input_mode    = "upload"
+                    rows = [
+                        {"step_type": s.step_type, "description": s.description}
+                        for s in result.steps
+                    ]
+                    st.session_state.steps_df = pd.DataFrame(rows, columns=["step_type", "description"])
+                    st.rerun()
+                except Exception as e:
+                    st.markdown(f'<div class="jnj-error">{e}</div>', unsafe_allow_html=True)
 
 # ── TAB: PASTE TEXT ───────────────────────────────────────────────────────────
 with tab_text:
