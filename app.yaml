@@ -1,1 +1,14 @@
-command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+command:
+  - "streamlit"
+  - "run"
+  - "streamlit_app.py"
+  - "--server.port"
+  - "8000"
+  - "--server.address"
+  - "0.0.0.0"
+  - "--server.headless"
+  - "true"
+  - "--server.enableCORS"
+  - "false"
+  - "--server.enableXsrfProtection"
+  - "false"
