@@ -335,15 +335,14 @@ def ai_query(
     p_esc = prompt.replace("'", "\\'")[:50_000]
 
     if system_prompt:
-        # messages-array form — sends system + user role separately
+        # Prepend system instructions into the single prompt string —
+        # compatible with all warehouse DBR versions (no named_struct/array needed)
         s_esc = system_prompt.replace("'", "\\'")[:15_000]
+        combined = f"{s_esc}\\n\\n---\\n\\n{p_esc}"
         sql = f"""
         SELECT ai_query(
             '{endpoint}',
-            messages => array(
-                named_struct('role', 'system',  'content', '{s_esc}'),
-                named_struct('role', 'user',    'content', '{p_esc}')
-            ),
+            '{combined}',
             modelParameters => named_struct('max_tokens', {max_tokens})
         ) AS response
         """
