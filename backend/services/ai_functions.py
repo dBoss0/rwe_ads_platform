@@ -24,7 +24,8 @@ from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
-WAREHOUSE_ID = "9525c51c721e3ac7"
+# Pulled from settings so it never drifts from config
+WAREHOUSE_ID: str = settings.warehouse_id
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -29,12 +29,14 @@ _load_dotenv()
 
 class Settings:
     # ── Databricks ────────────────────────────────────────────────────────────
-    databricks_host: str = os.environ.get("DATABRICKS_HOST", "").rstrip("/")
+    databricks_host: str = os.environ.get(
+        "DATABRICKS_HOST", "https://dbc-db3d8a4e-f2cf.cloud.databricks.com"
+    ).rstrip("/")
     databricks_token: str = os.environ.get("DATABRICKS_TOKEN", "")
 
     # ── Model Serving endpoints ───────────────────────────────────────────────
-    claude_endpoint: str = os.environ.get("CLAUDE_ENDPOINT", "databricks-claude-opus-5")
-    gpt_endpoint: str = os.environ.get("GPT_ENDPOINT", "databricks-gpt-55")
+    claude_endpoint: str = os.environ.get("CLAUDE_ENDPOINT", "databricks-gpt-5-5")
+    gpt_endpoint: str    = os.environ.get("GPT_ENDPOINT",    "databricks-gpt-5-5")
 
     # ── PHD Catalog (READ ONLY) ───────────────────────────────────────────────
     phd_catalog: str = os.environ.get("PHD_CATALOG", "rhealth_premier_phd")
