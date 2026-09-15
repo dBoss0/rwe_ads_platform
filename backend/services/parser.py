@@ -9,8 +9,8 @@ Parse pipeline (Databricks mode):
   Stage 5  ai_summarize          → short protocol summary for UI
 
 Parse pipeline (REST/local dev mode):
-  Stage 1  python-docx           → extract text from DOCX
-  Stage 3  REST → Claude endpoint → same structured JSON extraction
+  Stage 1  stdlib zipfile/ElementTree → extract text from DOCX (no external deps)
+  Stage 3  ai_query (SQL) → Claude, falls back to REST if warehouse unavailable
   (Stages 2, 4, 5 skipped — no Databricks SQL available locally)
 
 NO hardcoded stop words. NO fixed section headings.
@@ -33,6 +33,7 @@ from backend.services.ai_functions import (
     ai_parse_document,
     extract_text_from_parsed_doc,
     ai_extract,
+    ai_query,
     ai_classify_batch,
     ai_summarize,
 )
@@ -231,24 +232,67 @@ def _local_extract_docx(file_path: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 3: LLM criteria extraction via REST
+# Stage 3: LLM criteria extraction
+# Primary  → ai_query() via SQL Statement API  (Databricks, most reliable)
+# Fallback → direct REST call                  (local dev without warehouse)
 # ─────────────────────────────────────────────────────────────────────────────
+
+_USER_EXTRACT_TMPL = (
+    "Extract ALL inclusion and exclusion criteria from this clinical study protocol.\n"
+    "Return ONLY valid JSON — no markdown fences, no explanation, no text before or after the JSON.\n\n"
+    "PROTOCOL TEXT:\n{text}"
+)
+
 
 def _call_llm_parser(protocol_text: str) -> Optional[dict]:
     """
-    Call Claude via Model Serving REST API to extract structured criteria.
-    Used in all parse modes (Databricks + local).
-    """
-    user_message = (
-        "Extract ALL inclusion and exclusion criteria from the following clinical "
-        "study protocol. Return ONLY valid JSON — no explanation, no markdown.\n\n"
-        f"PROTOCOL TEXT:\n{protocol_text[:60_000]}"
-    )
+    Route criteria extraction through ai_query (SQL Statement API) when a
+    warehouse is available, fall back to direct REST for local dev.
 
+    ai_query is preferred because it uses the same warehouse auth as all
+    other AI Function calls — no separate token/URL management needed.
+    """
+    user_msg = _USER_EXTRACT_TMPL.format(text=protocol_text[:55_000])
+
+    # ── Path A: ai_query via SQL Statement API (Databricks / Apps) ─────────
+    if settings.databricks_host and settings.databricks_token:
+        try:
+            raw = ai_query(
+                endpoint=settings.claude_endpoint,
+                prompt=user_msg,
+                system_prompt=PARSER_SYSTEM_PROMPT,
+                max_tokens=8000,
+            )
+            if raw:
+                result = _extract_json(raw if isinstance(raw, str) else json.dumps(raw))
+                if result:
+                    logger.info("Stage 3: ai_query succeeded.")
+                    return result
+                logger.warning("Stage 3: ai_query returned non-JSON — trying REST fallback.")
+        except Exception as e:
+            logger.warning("Stage 3: ai_query failed (%s) — trying REST fallback.", e)
+
+    # ── Path B: direct REST to Model Serving (local dev) ───────────────────
+    return _call_llm_rest(protocol_text)
+
+
+def _call_llm_rest(protocol_text: str) -> Optional[dict]:
+    """
+    Direct REST call to the Databricks Model Serving endpoint.
+    Used as fallback when SQL warehouse is unavailable (local dev, testing).
+    """
+    if not settings.databricks_host or not settings.databricks_token:
+        logger.error(
+            "Stage 3 REST: DATABRICKS_HOST / DATABRICKS_TOKEN not set. "
+            "Cannot call Claude endpoint."
+        )
+        return None
+
+    user_msg = _USER_EXTRACT_TMPL.format(text=protocol_text[:55_000])
     payload = {
         "messages": [
             {"role": "system", "content": PARSER_SYSTEM_PROMPT},
-            {"role": "user",   "content": user_message},
+            {"role": "user",   "content": user_msg},
         ],
         "max_tokens": 8000,
     }
@@ -266,34 +310,61 @@ def _call_llm_parser(protocol_text: str) -> Optional[dict]:
         resp.raise_for_status()
         content = resp.json()["choices"][0]["message"]["content"]
 
-        # Handle Databricks content-block format
+        # Databricks may return a content-block list
         if isinstance(content, list):
             content = "\n".join(
                 b.get("text", "")
                 for b in content
                 if isinstance(b, dict) and b.get("type") == "text"
             )
-        return _extract_json(content.strip())
+        result = _extract_json(content.strip())
+        if result:
+            logger.info("Stage 3: REST fallback succeeded.")
+        return result
 
     except Exception as e:
-        logger.error("LLM parser call failed: %s", e)
+        logger.error("Stage 3 REST failed: %s", e)
         return None
 
 
 def _extract_json(raw: str) -> Optional[dict]:
-    """Strip markdown fences and parse JSON from LLM response."""
+    """
+    Parse JSON from LLM response — handles markdown fences, leading/trailing
+    text, and common formatting quirks (trailing commas, smart quotes).
+    """
+    if not raw:
+        return None
+
+    # Strip markdown fences
     raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
-    raw = re.sub(r"\s*```$", "", raw.strip())
+    raw = re.sub(r"\s*```\s*$", "", raw.strip())
+
+    # Replace smart / curly quotes with straight quotes
+    raw = raw.replace("“", '"').replace("”", '"')
+    raw = raw.replace("‘", "'").replace("’", "'")
+
+    # Attempt 1: direct parse
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group())
-            except json.JSONDecodeError:
-                pass
-    logger.error("Could not parse JSON from LLM: %s", raw[:300])
+        pass
+
+    # Attempt 2: extract first {...} block (handles preamble text)
+    match = re.search(r"\{.*\}", raw, re.DOTALL)
+    if match:
+        candidate = match.group()
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+        # Attempt 3: remove trailing commas before } or ]
+        cleaned = re.sub(r",\s*([}\]])", r"\1", candidate)
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            pass
+
+    logger.error("Could not parse JSON from LLM response (first 400 chars): %s", raw[:400])
     return None
 
 

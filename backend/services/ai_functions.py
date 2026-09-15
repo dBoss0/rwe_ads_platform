@@ -312,28 +312,46 @@ def ai_classify_batch(criterion_texts: list[str]) -> list[str]:
 def ai_query(
     endpoint: str,
     prompt: str,
+    system_prompt: Optional[str] = None,
     response_format: Optional[str] = None,
     max_tokens: int = 8000,
 ) -> Optional[str]:
     """
     Call a Databricks Model Serving endpoint via ai_query SQL function.
 
+    When system_prompt is provided the call uses the messages-array form so
+    the system role is sent correctly (Claude respects it for tone + format).
+
     Args:
-        endpoint:        Endpoint name (e.g. 'databricks-claude-opus-5')
-        prompt:          User prompt string
+        endpoint:        Endpoint name, e.g. 'databricks-claude-opus-5'
+        prompt:          User-role prompt string
+        system_prompt:   Optional system-role instruction
         response_format: Optional STRUCT schema string for structured output
-        max_tokens:      Max tokens for the response
+        max_tokens:      Max response tokens
 
     Returns:
-        Response string (or JSON string if response_format is set).
+        Response text (string), or None on failure.
     """
-    prompt_escaped = prompt.replace("'", "\\'")[:50_000]
+    p_esc = prompt.replace("'", "\\'")[:50_000]
 
-    if response_format:
+    if system_prompt:
+        # messages-array form — sends system + user role separately
+        s_esc = system_prompt.replace("'", "\\'")[:15_000]
         sql = f"""
         SELECT ai_query(
             '{endpoint}',
-            '{prompt_escaped}',
+            messages => array(
+                named_struct('role', 'system',  'content', '{s_esc}'),
+                named_struct('role', 'user',    'content', '{p_esc}')
+            ),
+            modelParameters => named_struct('max_tokens', {max_tokens})
+        ) AS response
+        """
+    elif response_format:
+        sql = f"""
+        SELECT ai_query(
+            '{endpoint}',
+            '{p_esc}',
             responseFormat => '{response_format}',
             modelParameters => named_struct('max_tokens', {max_tokens})
         ) AS response
@@ -342,13 +360,18 @@ def ai_query(
         sql = f"""
         SELECT ai_query(
             '{endpoint}',
-            '{prompt_escaped}',
+            '{p_esc}',
             modelParameters => named_struct('max_tokens', {max_tokens})
         ) AS response
         """
 
     rows = _run_sql(sql, timeout=120)
-    return _first_cell(rows, "response")
+    raw  = _first_cell(rows, "response")
+
+    # ai_query may return a STRUCT-like dict with a 'content' key
+    if isinstance(raw, dict):
+        return raw.get("content") or raw.get("text") or json.dumps(raw)
+    return raw
 
 
 # ─────────────────────────────────────────────────────────────────────────────
