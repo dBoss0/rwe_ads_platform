@@ -479,7 +479,7 @@ with tab_upload:
                     st.session_state.input_mode    = "upload"
                     rows = [
                         {"step_type": s.step_type, "description": s.description}
-                        for s in result.steps
+                        for s in result.all_steps
                     ]
                     st.session_state.steps_df = pd.DataFrame(rows, columns=["step_type", "description"])
                     st.rerun()
@@ -516,7 +516,7 @@ with tab_text:
                     st.session_state.input_mode   = "text"
                     rows = [
                         {"step_type": s.step_type, "description": s.description}
-                        for s in result.steps
+                        for s in result.all_steps
                     ]
                     st.session_state.steps_df = pd.DataFrame(rows, columns=["step_type", "description"])
                     st.rerun()
