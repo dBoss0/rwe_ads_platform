@@ -16,6 +16,7 @@ from backend.services.notebook_builder import build_notebook, make_temp_table_na
 from backend.services.databricks_client import (
     save_notebook, get_notebook_url, get_current_user, is_databricks_app,
 )
+from backend.services.genie_client import ask_genie_for_attrition
 from backend.models.attrition import StepInput, CodeList, CodeEntry
 
 
@@ -953,63 +954,157 @@ if st.session_state.steps_df is not None:
     if nb_path_input:
         st.session_state.nb_path_override = nb_path_input
 
-    col_gen, col_dl = st.columns([2, 1])
-    with col_gen:
-        push_btn = st.button("Generate & Push to Databricks", type="primary", use_container_width=True)
+    # ── Action buttons ─────────────────────────────────────────────────────────
+    col_genie, col_nb, col_dl = st.columns([3, 2, 1])
+    with col_genie:
+        genie_btn = st.button(
+            "⚡ Generate via Genie Agent",
+            type="primary",
+            use_container_width=True,
+            help="Sends criteria to the Genie agent — same output as the Genie UI",
+        )
+    with col_nb:
+        push_btn = st.button(
+            "Generate Notebook (template)",
+            type="secondary",
+            use_container_width=True,
+            help="Uses the local SQL template builder (no live data)",
+        )
     with col_dl:
         if st.session_state.dbx_notebook_sql:
             st.download_button(
-                "Download SQL",
+                "↓ SQL",
                 data=st.session_state.dbx_notebook_sql,
                 file_name=f"{safe_title}_attrition.sql",
                 mime="text/plain",
                 use_container_width=True,
             )
 
-    if push_btn:
-        src_df = edited_df if edited_df is not None else st.session_state.steps_df
+    # ── Shared: build clean steps and code lists ───────────────────────────────
+    def _build_clean_inputs():
+        src_df   = edited_df if edited_df is not None else st.session_state.steps_df
         clean_df = (
             src_df
             .dropna(subset=["description"])
             .pipe(lambda d: d[d["description"].str.strip() != ""])
             .reset_index(drop=True)
         )
+        inc_list = clean_df[clean_df["step_type"] == "inclusion"]["description"].tolist()
+        exc_list = clean_df[clean_df["step_type"] == "exclusion"]["description"].tolist()
 
+        code_list_dicts   = []
+        code_list_models  = []
+        active_cl = st.session_state.codelists_df
+        if active_cl is not None and not active_cl.empty and st.session_state.selected_conditions:
+            active_cl = active_cl[active_cl["condition"].isin(st.session_state.selected_conditions)]
+            for (cond, sys), grp in active_cl.groupby(["condition", "coding_system"]):
+                entries = [{"code": r["code"], "description": r.get("description", "")} for _, r in grp.iterrows()]
+                code_list_dicts.append({"condition": cond, "coding_system": sys, "codes": entries})
+                models_entries = [CodeEntry(code=r["code"], description=r.get("description", "")) for _, r in grp.iterrows()]
+                code_list_models.append(CodeList(condition=cond, coding_system=sys, codes=models_entries))
+
+        step_inputs = [
+            StepInput(
+                step_num=i + 1,
+                step_type=row["step_type"],
+                description=row["description"],
+                criterion_type=row.get("criterion_type", "primary"),
+            )
+            for i, (_, row) in enumerate(clean_df.iterrows())
+        ]
+        return clean_df, inc_list, exc_list, code_list_dicts, code_list_models, step_inputs
+
+    # ── GENIE PATH ─────────────────────────────────────────────────────────────
+    if genie_btn:
+        clean_df, inc_list, exc_list, code_list_dicts, _, _ = _build_clean_inputs()
+        if clean_df.empty:
+            st.warning("Add at least one attrition step first.")
+        else:
+            with st.spinner("Asking Genie agent… (may take 30–60 seconds)"):
+                try:
+                    result = ask_genie_for_attrition(
+                        title=st.session_state.title,
+                        inclusion_criteria=inc_list,
+                        exclusion_criteria=exc_list,
+                        code_lists=code_list_dicts or None,
+                        study_window=st.session_state.study_window or "",
+                    )
+
+                    notebook_sql = result["sql"]
+                    genie_url    = result["genie_url"]
+                    summary_txt  = result["summary"]
+                    st.session_state.dbx_notebook_sql = notebook_sql
+                    st.session_state.steps_df         = clean_df
+
+                    # Show Genie summary
+                    if summary_txt:
+                        st.markdown(
+                            f'<div class="jnj-info"><strong>Genie:</strong> {summary_txt}</div>',
+                            unsafe_allow_html=True,
+                        )
+
+                    # Show result rows if Genie ran a query
+                    if result["rows"]:
+                        st.markdown(
+                            f'<div style="font-size:0.68rem;font-weight:800;letter-spacing:0.14em;'
+                            f'text-transform:uppercase;color:{JNJ_GRAY_05};margin-bottom:0.5rem;">'
+                            f'Genie Query Result &nbsp;·&nbsp; {len(result["rows"])} rows</div>',
+                            unsafe_allow_html=True,
+                        )
+                        st.dataframe(pd.DataFrame(result["rows"]), use_container_width=True)
+
+                    # Push SQL to notebook
+                    if notebook_sql:
+                        nb_path = (st.session_state.nb_path_override or "").strip() or nb_default
+                        with st.spinner(f"Saving Genie SQL to notebook: {nb_path}"):
+                            save_notebook(nb_path, notebook_sql)
+                            nb_url = get_notebook_url(nb_path)
+                            st.session_state.dbx_notebook_url = nb_url
+                            st.session_state.notebook_path    = nb_path
+
+                        st.markdown(f"""
+                        <div class="jnj-success">
+                            ✓ Genie SQL saved &nbsp;·&nbsp; {len(clean_df)} steps<br>
+                            <a href="{nb_url}" target="_blank" style="color:#1e5c0a;font-weight:700;">
+                                Open Notebook →
+                            </a>
+                            &nbsp;&nbsp;
+                            <a href="{genie_url}" target="_blank" style="color:{JNJ_BLUE_03};font-weight:700;">
+                                Open in Genie →
+                            </a>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.markdown(
+                            f'<div class="jnj-info">Genie responded but generated no SQL query. '
+                            f'<a href="{genie_url}" target="_blank">Open in Genie</a> to continue.</div>',
+                            unsafe_allow_html=True,
+                        )
+
+                except Exception as e:
+                    st.markdown(
+                        f'<div class="jnj-error"><strong>Genie error:</strong> {e}</div>',
+                        unsafe_allow_html=True,
+                    )
+
+    # ── TEMPLATE NOTEBOOK PATH ─────────────────────────────────────────────────
+    if push_btn:
+        clean_df, _, _, _, code_list_models, step_inputs = _build_clean_inputs()
         if clean_df.empty:
             st.warning("No valid steps found. Add at least one attrition step.")
         else:
-            # Build StepInput list
-            step_inputs = [
-                StepInput(
-                    step_num=i + 1,
-                    step_type=row["step_type"],
-                    description=row["description"],
-                    criterion_type=row.get("criterion_type", "primary"),
-                )
-                for i, (_, row) in enumerate(clean_df.iterrows())
-            ]
-
-            # Build CodeList list
-            code_list_inputs = []
-            active_cl = st.session_state.codelists_df
-            if active_cl is not None and not active_cl.empty and st.session_state.selected_conditions:
-                active_cl = active_cl[active_cl["condition"].isin(st.session_state.selected_conditions)]
-                for (cond, sys), grp in active_cl.groupby(["condition", "coding_system"]):
-                    entries = [CodeEntry(code=r["code"], description=r.get("description", "")) for _, r in grp.iterrows()]
-                    code_list_inputs.append(CodeList(condition=cond, coding_system=sys, codes=entries))
-
-            with st.spinner("Generating notebook…"):
+            with st.spinner("Generating notebook from template…"):
                 try:
-                    notebook_sql, step_sqls = build_notebook(
+                    notebook_sql, _ = build_notebook(
                         title=st.session_state.title,
                         steps=step_inputs,
-                        code_lists=code_list_inputs or None,
+                        code_lists=code_list_models or None,
                         study_window=st.session_state.study_window or "",
                     )
                     st.session_state.dbx_notebook_sql = notebook_sql
-                    st.session_state.steps_df = clean_df
+                    st.session_state.steps_df         = clean_df
                 except Exception as e:
-                    st.markdown(f'<div class="jnj-error">Notebook generation failed: {e}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="jnj-error">Template generation failed: {e}</div>', unsafe_allow_html=True)
                     notebook_sql = None
 
             if notebook_sql:
@@ -1020,40 +1115,45 @@ if st.session_state.steps_df is not None:
                         nb_url = get_notebook_url(nb_path)
                         st.session_state.dbx_notebook_url = nb_url
                         st.session_state.notebook_path    = nb_path
-
                         cl_count = len(st.session_state.codelists_df) if st.session_state.codelists_df is not None else 0
                         st.markdown(f"""
                         <div class="jnj-success">
-                            ✓ Notebook pushed to Databricks &nbsp;·&nbsp; {len(clean_df)} steps &nbsp;·&nbsp; {cl_count} codes<br>
+                            ✓ Notebook pushed &nbsp;·&nbsp; {len(clean_df)} steps &nbsp;·&nbsp; {cl_count} codes<br>
                             <a href="{nb_url}" target="_blank" style="color:#1e5c0a;font-weight:700;">{nb_path}</a>
                         </div>
                         """, unsafe_allow_html=True)
-
                     except Exception as e:
                         st.markdown(f'<div class="jnj-error">Push failed: {e}</div>', unsafe_allow_html=True)
 
-                # Step preview
-                rows_html = ""
-                for i, (_, row) in enumerate(clean_df.iterrows(), 1):
-                    t   = row["step_type"]
-                    css = "inc" if t == "inclusion" else "exc"
-                    lbl = "INC" if t == "inclusion" else "EXC"
-                    desc = str(row["description"]).strip()
-                    rows_html += (
-                        f'<div class="jnj-step-row">'
-                        f'<span class="jnj-step-index">{i:02d}</span>'
-                        f'<span class="jnj-badge jnj-badge-{css}">{lbl}</span>'
-                        f'<span class="jnj-step-text">{desc}</span>'
-                        f'</div>'
-                    )
-                st.markdown(f"""
-                <div class="jnj-card" style="padding:0;overflow:hidden;margin-top:1rem;">
-                    <div style="padding:1rem 1.4rem;border-bottom:1px solid {JNJ_GRAY_02};font-size:0.68rem;font-weight:800;letter-spacing:0.14em;text-transform:uppercase;color:{JNJ_GRAY_05};">
-                        Step Preview &nbsp;·&nbsp; {len(clean_df)} steps
-                    </div>
-                    {rows_html}
-                </div>
-                """, unsafe_allow_html=True)
+    # ── Step preview (shown after either path runs) ────────────────────────────
+    src_df_preview = edited_df if edited_df is not None else st.session_state.steps_df
+    if st.session_state.dbx_notebook_sql and src_df_preview is not None:
+        preview_df = src_df_preview.dropna(subset=["description"]).pipe(
+            lambda d: d[d["description"].str.strip() != ""]
+        )
+        rows_html = ""
+        for i, (_, row) in enumerate(preview_df.iterrows(), 1):
+            t    = row["step_type"]
+            css  = "inc" if t == "inclusion" else "exc"
+            lbl  = "INC" if t == "inclusion" else "EXC"
+            desc = str(row["description"]).strip()
+            rows_html += (
+                f'<div class="jnj-step-row">'
+                f'<span class="jnj-step-index">{i:02d}</span>'
+                f'<span class="jnj-badge jnj-badge-{css}">{lbl}</span>'
+                f'<span class="jnj-step-text">{desc}</span>'
+                f'</div>'
+            )
+        st.markdown(f"""
+        <div class="jnj-card" style="padding:0;overflow:hidden;margin-top:1rem;">
+            <div style="padding:1rem 1.4rem;border-bottom:1px solid {JNJ_GRAY_02};
+                        font-size:0.68rem;font-weight:800;letter-spacing:0.14em;
+                        text-transform:uppercase;color:{JNJ_GRAY_05};">
+                Step Preview &nbsp;·&nbsp; {len(preview_df)} steps
+            </div>
+            {rows_html}
+        </div>
+        """, unsafe_allow_html=True)
 
 
 st.markdown('</div>', unsafe_allow_html=True)
