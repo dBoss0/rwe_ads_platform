@@ -1,87 +1,113 @@
 # Databricks notebook source
 # ════════════════════════════════════════════════════════════════════════════
-# RWE ADS Automation Platform — Orchestrator
-# Fully Databricks-native.  No local installs.  No VS Code.
+# RWE ADS Automation Platform — Multi-Notebook Orchestrator
+# Fully Databricks-native. No local installs. No VS Code.
 #
-# HOW TO USE:
-#   1. Fill the widgets at the top of this notebook
-#   2. Click "Run All"
-#   3. Genie Agent generates the attrition SQL
-#   4. SQL is executed live — waterfall counts printed
-#   5. A study-specific notebook is auto-created in your workspace
-#   6. Click the links at the bottom to open notebook or Genie chat
+# HOW TO USE — first run (new study):
+#   1. Fill Study Title, Window, Inclusion, Exclusion, Code Lists widgets
+#   2. Leave Conversation ID blank  →  starts a fresh Genie conversation
+#   3. Prompt = "Generate the full attrition pipeline"
+#   4. Click Run All
+#   → Creates: /Shared/ads_automation/studies/{title}/01_attrition_pipeline
 #
-# EACH USER / EACH STUDY → runs this once → gets their own output notebook
+# HOW TO USE — next generation (same study, NEW notebook):
+#   1. Keep Study Title the same (same folder)
+#   2. Set Conversation ID = the printed CONV_ID from the previous run
+#      (or leave blank to start a new Genie conversation)
+#   3. Prompt = "/new: feasibility device analysis  →  How many patients
+#      had a bariatric device? Break down by device type."
+#      ↑ /new: triggers a new notebook named after the text after the colon
+#   4. Click Run All
+#   → Creates: /Shared/ads_automation/studies/{title}/02_feasibility_device_analysis
+#
+# COMMAND REFERENCE:
+#   /new: <name>   →  save generation to a NEW notebook (next number in folder)
+#   /append        →  add to existing latest notebook (default)
+#   /summary       →  ask Genie to summarise the whole study so far
 # ════════════════════════════════════════════════════════════════════════════
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # 🏥 RWE ADS Automation Platform
-# MAGIC ### Cohort Attrition · Powered by Genie Agent
+# MAGIC # 🏥 RWE ADS Automation — Multi-Notebook Orchestrator
+# MAGIC ### Each `/new:` command → new numbered notebook in your study folder
 # MAGIC ---
-# MAGIC **Instructions**
-# MAGIC 1. Fill the widgets above (study title, criteria, codes)
-# MAGIC 2. Click **Run All**
-# MAGIC 3. Genie generates SQL → executed live → notebook auto-created
-# MAGIC
-# MAGIC > Each run creates a separate study notebook under `/Shared/ads_automation/studies/`
+# MAGIC | Widget | Purpose |
+# MAGIC |--------|---------|
+# MAGIC | **Study Title** | Names the study folder — keep it the same across runs |
+# MAGIC | **Prompt** | What to ask Genie. Start with `/new: name` for a new notebook |
+# MAGIC | **Conversation ID** | Paste from previous run to continue same Genie chat |
+# MAGIC | **Inclusion / Exclusion / Code Lists** | Only needed on first run |
 
 # COMMAND ----------
 
-# ── Widgets — fill these before running ──────────────────────────────────────
+# ── Widgets ───────────────────────────────────────────────────────────────────
 dbutils.widgets.removeAll()
 
 dbutils.widgets.text(
     "study_title",
-    "Bariatric Surgery Comparative Effectiveness Study",
-    "Study Title"
+    "My Study Title",
+    "Study Title  (kept the same across all runs — becomes the folder name)"
 )
 dbutils.widgets.text(
     "study_window",
-    "January 2016 to December 2022",
-    "Study Window"
+    "January 2019 to December 2023",
+    "Study Window  (date range, e.g. January 2019 to December 2023)"
 )
 dbutils.widgets.text(
-    "output_folder",
-    "/Shared/ads_automation/studies",
-    "Output Folder (workspace path)"
+    "conversation_id",
+    "",
+    "Genie Conversation ID  (blank = start new conversation)"
 )
-# Paste criteria as a JSON array of strings
+dbutils.widgets.text(
+    "output_root",
+    "/Shared/ads_automation/studies",
+    "Output Root Folder"
+)
+
+dbutils.widgets.text(
+    "prompt",
+    "Generate the full step-by-step attrition pipeline with patient counts at every step.",
+    "Prompt  —  Start with  /new: <topic>  to save to a new notebook in the study folder"
+)
+
+# ── These only matter on the first run ─────────────────────────────────────
+# On subsequent runs Genie remembers the study context via conversation_id.
+# Replace with your actual criteria from the study protocol.
 dbutils.widgets.text(
     "inclusion_criteria",
-    '["Inpatient admission with primary ICD-10-PCS procedure code for surgery of interest between Jan 2016 and Dec 2022", "Age 18 years or older at index admission", "Hospital contributes data for at least 90 days post-discharge", "Known gender (M or F)", "Publish type = Comparative Valid (CV)"]',
-    "Inclusion Criteria (JSON array)"
+    '["Describe inclusion criterion 1", "Describe inclusion criterion 2", "Describe inclusion criterion 3"]',
+    "Inclusion Criteria  (JSON array of strings — first run only)"
 )
 dbutils.widgets.text(
     "exclusion_criteria",
-    '["Zero or negative episode/supply/inpatient room and board costs", "Missing data (patients with missing data will not be included)"]',
-    "Exclusion Criteria (JSON array)"
+    '["Describe exclusion criterion 1", "Describe exclusion criterion 2"]',
+    "Exclusion Criteria  (JSON array of strings — first run only)"
 )
-# Code lists: list of {condition, coding_system, codes:[...]}
 dbutils.widgets.text(
     "code_lists",
-    '[{"condition": "RYGB", "coding_system": "ICD-10-PCS", "codes": ["0D160ZA","0D160Z3","0D160Z4"]}, {"condition": "Sleeve Gastrectomy", "coding_system": "ICD-10-PCS", "codes": ["0DB64Z3","0DB60Z3"]}, {"condition": "BPD Duodenal Switch", "coding_system": "ICD-10-PCS", "codes": ["0D194ZA","0D190ZA"]}]',
-    "Code Lists (JSON)"
+    '[{"condition": "Condition Name", "coding_system": "ICD-10-PCS", "codes": ["CODE1", "CODE2"]}]',
+    "Code Lists  (JSON array — first run only)"
 )
 
-print("Widgets ready. Proceed to next cell.")
+print("Widgets ready.")
 
 # COMMAND ----------
 
-# ── Read widget inputs ────────────────────────────────────────────────────────
+# ── Imports & context ─────────────────────────────────────────────────────────
 import json, re, requests, time, base64
 
 STUDY_TITLE    = dbutils.widgets.get("study_title").strip()
 STUDY_WINDOW   = dbutils.widgets.get("study_window").strip()
-OUTPUT_FOLDER  = dbutils.widgets.get("output_folder").strip().rstrip("/")
+CONV_ID_IN     = dbutils.widgets.get("conversation_id").strip()
+OUTPUT_ROOT    = dbutils.widgets.get("output_root").strip().rstrip("/")
+RAW_PROMPT     = dbutils.widgets.get("prompt").strip()
 INCLUSION      = json.loads(dbutils.widgets.get("inclusion_criteria"))
 EXCLUSION      = json.loads(dbutils.widgets.get("exclusion_criteria"))
 CODE_LISTS     = json.loads(dbutils.widgets.get("code_lists"))
 
 GENIE_SPACE_ID = "01f1ad05e9a811de88b3f1c49399c3c1"
 
-# Databricks context — host and token from notebook session (no secrets needed)
 ctx   = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
 TOKEN = ctx.apiToken().get()
 HOST  = f"https://{ctx.browserHostName().get()}"
@@ -90,97 +116,176 @@ GENIE_BASE = f"{HOST}/api/2.0/genie/spaces/{GENIE_SPACE_ID}"
 WS_BASE    = f"{HOST}/api/2.0/workspace"
 HEADERS    = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
 
+# Study folder path
+safe_study = re.sub(r"[^a-zA-Z0-9]", "_", STUDY_TITLE).strip("_")[:60]
+STUDY_PATH = f"{OUTPUT_ROOT}/{safe_study}"
+
+print(f"Study folder : {STUDY_PATH}")
 print(f"Host         : {HOST}")
-print(f"Study        : {STUDY_TITLE}")
-print(f"Window       : {STUDY_WINDOW}")
-print(f"Inclusion    : {len(INCLUSION)} steps")
-print(f"Exclusion    : {len(EXCLUSION)} steps")
-print(f"Code groups  : {len(CODE_LISTS)}")
-print(f"Output folder: {OUTPUT_FOLDER}")
 
 # COMMAND ----------
 
-# MAGIC %md ### Step 1 — Build Prompt & Send to Genie Agent
+# MAGIC %md ### Step 1 — Parse Command & Decide Notebook Routing
 
 # COMMAND ----------
 
-# ── Build attrition prompt ────────────────────────────────────────────────────
-def build_prompt():
-    lines = [f"Cohort Attrition SQL for: {STUDY_TITLE}", ""]
+# ── Parse /new: command from prompt ──────────────────────────────────────────
+CMD_NEW     = False
+NB_TOPIC    = ""
+CLEAN_PROMPT = RAW_PROMPT
+
+# Detect /new: <name> at start of prompt (case-insensitive)
+new_match = re.match(r"^/new:\s*(.+?)(?:\s{2,}|\n|→|->|$)(.*)", RAW_PROMPT, re.DOTALL | re.IGNORECASE)
+if new_match:
+    CMD_NEW      = True
+    NB_TOPIC     = new_match.group(1).strip()
+    CLEAN_PROMPT = new_match.group(2).strip() or NB_TOPIC  # rest of prompt, or topic as question
+elif RAW_PROMPT.lower().startswith("/new"):
+    CMD_NEW      = True
+    NB_TOPIC     = re.sub(r"^/new[:\s]*", "", RAW_PROMPT, flags=re.IGNORECASE).strip()
+    CLEAN_PROMPT = NB_TOPIC
+
+print(f"Command      : {'NEW NOTEBOOK' if CMD_NEW else 'DEFAULT (new or append)'}")
+print(f"Topic        : {NB_TOPIC or '(first run — attrition pipeline)'}")
+print(f"Clean prompt : {CLEAN_PROMPT[:120]}...")
+
+# COMMAND ----------
+
+# ── Find next notebook number in study folder ─────────────────────────────────
+def get_next_notebook_number(study_path: str) -> int:
+    """List existing notebooks in the study folder and return next index."""
+    try:
+        r = requests.get(
+            f"{WS_BASE}/list",
+            headers=HEADERS,
+            params={"path": study_path},
+            timeout=15
+        )
+        if r.status_code == 404:
+            return 1  # folder doesn't exist yet → first notebook
+        r.raise_for_status()
+        objects = r.json().get("objects", [])
+        nums = []
+        for obj in objects:
+            m = re.match(r".*?/(\d+)_", obj.get("path", ""))
+            if m:
+                nums.append(int(m.group(1)))
+        return max(nums) + 1 if nums else 1
+    except Exception as e:
+        print(f"Note: could not list folder ({e}). Defaulting to 01.")
+        return 1
+
+NB_NUM = get_next_notebook_number(STUDY_PATH)
+
+# Build notebook name
+if NB_TOPIC:
+    safe_topic = re.sub(r"[^a-zA-Z0-9]", "_", NB_TOPIC).strip("_")[:50]
+else:
+    safe_topic = "attrition_pipeline"
+
+NB_NAME = f"{NB_NUM:02d}_{safe_topic}"
+NB_PATH = f"{STUDY_PATH}/{NB_NAME}"
+
+print(f"Notebook     : {NB_PATH}")
+
+# COMMAND ----------
+
+# MAGIC %md ### Step 2 — Build Prompt & Ask Genie
+
+# COMMAND ----------
+
+# ── Build full Genie prompt ───────────────────────────────────────────────────
+def build_first_run_prompt():
+    """Full criteria prompt for the first conversation turn."""
+    lines = [f"Study: {STUDY_TITLE}", ""]
     if STUDY_WINDOW:
         lines += [f"Study window: {STUDY_WINDOW}", ""]
-
     lines += ["Inclusion Criteria:"]
     for i, c in enumerate(INCLUSION, 1):
         lines.append(f"  {i}. {c}")
-
     lines += ["", "Exclusion Criteria:"]
     for i, c in enumerate(EXCLUSION, 1):
         lines.append(f"  {i}. {c}")
-
     if CODE_LISTS:
-        lines += ["", "Procedure / Diagnosis Code Lists:"]
+        lines += ["", "Code Lists:"]
         for cl in CODE_LISTS:
-            codes = cl.get("codes", [])
-            codes_str = ", ".join(str(c) for c in codes[:40])
-            extra = f" ... +{len(codes)-40} more" if len(codes) > 40 else ""
+            codes_str = ", ".join(str(c) for c in cl.get("codes", [])[:40])
+            extra     = f" (+{len(cl['codes'])-40} more)" if len(cl.get("codes",[])) > 40 else ""
             lines.append(f"  {cl['condition']} ({cl['coding_system']}): {codes_str}{extra}")
-
     lines += [
         "",
+        CLEAN_PROMPT,
+        "",
         "Requirements:",
-        "  - Generate the full step-by-step attrition SQL pipeline",
-        "  - Use CREATE OR REPLACE TEMPORARY TABLE for each step",
-        "  - Step 1 = index procedure identification using the codes above",
-        "  - Each subsequent step filters from the previous temp table",
-        "  - End each step with SELECT COUNT(*) to show patient count",
-        "  - Use Premier PHD tables: pat, paticd_proc, paticd_diag, patcpt, prov_enrollment",
+        "  - CREATE OR REPLACE TEMPORARY TABLE per attrition step",
+        "  - Step 1 = index procedure identification",
+        "  - Each step filters from the previous temp table",
+        "  - End with SELECT COUNT(*) at each step",
     ]
     return "\n".join(lines)
 
-PROMPT = build_prompt()
-print(f"Prompt built — {len(PROMPT)} characters")
-print("-" * 60)
-print(PROMPT[:500] + "..." if len(PROMPT) > 500 else PROMPT)
+# Is this a continuation of an existing conversation?
+IS_CONTINUATION = bool(CONV_ID_IN)
+
+if IS_CONTINUATION:
+    GENIE_PROMPT = CLEAN_PROMPT
+    print(f"Continuing conversation: {CONV_ID_IN}")
+else:
+    GENIE_PROMPT = build_first_run_prompt()
+    print("New conversation — full criteria prompt built.")
+
+print(f"Prompt length: {len(GENIE_PROMPT)} chars")
 
 # COMMAND ----------
 
-# ── Send to Genie Agent ───────────────────────────────────────────────────────
-resp = requests.post(
-    f"{GENIE_BASE}/start-conversation",
-    headers=HEADERS,
-    json={"content": PROMPT},
-    timeout=60
-)
-resp.raise_for_status()
+# ── Call Genie ────────────────────────────────────────────────────────────────
+if IS_CONTINUATION:
+    # Send message in existing conversation
+    resp = requests.post(
+        f"{GENIE_BASE}/conversations/{CONV_ID_IN}/messages",
+        headers=HEADERS,
+        json={"content": GENIE_PROMPT},
+        timeout=60
+    )
+else:
+    # Start brand-new conversation
+    resp = requests.post(
+        f"{GENIE_BASE}/start-conversation",
+        headers=HEADERS,
+        json={"content": GENIE_PROMPT},
+        timeout=60
+    )
 
+resp.raise_for_status()
 data    = resp.json()
-CONV_ID = data["conversation_id"]
-MSG_ID  = data["message_id"]
+CONV_ID = data.get("conversation_id", CONV_ID_IN)
+MSG_ID  = data.get("message_id") or data.get("id", "")
 
 GENIE_LINK = f"{HOST}/genie/rooms/{GENIE_SPACE_ID}/chats/{CONV_ID}"
 
-print("✓ Genie conversation started")
+print(f"\n✓ Genie conversation active")
 print(f"  conversation_id : {CONV_ID}")
 print(f"  message_id      : {MSG_ID}")
 print(f"  Genie URL       : {GENIE_LINK}")
+print(f"\n  ⬇  Copy conversation_id for your NEXT run:")
+print(f"  {CONV_ID}")
 
 # COMMAND ----------
 
-# MAGIC %md ### Step 2 — Wait for Genie to Generate SQL
+# MAGIC %md ### Step 3 — Wait for Genie
 
 # COMMAND ----------
 
 # ── Poll until COMPLETED ──────────────────────────────────────────────────────
-MAX_WAIT_SEC  = 300
-POLL_INTERVAL = 5
-GENIE_MSG     = None
+MAX_WAIT  = 300
+INTERVAL  = 5
+GENIE_MSG = None
 
-print("Polling Genie (up to 5 minutes)...")
+print(f"Polling Genie... (max {MAX_WAIT}s)")
 print(f"{'Elapsed':>8}   Status")
-print("-" * 30)
+print("-" * 28)
 
-for elapsed in range(0, MAX_WAIT_SEC, POLL_INTERVAL):
+for elapsed in range(0, MAX_WAIT, INTERVAL):
     r      = requests.get(
         f"{GENIE_BASE}/conversations/{CONV_ID}/messages/{MSG_ID}",
         headers=HEADERS, timeout=30
@@ -194,201 +299,198 @@ for elapsed in range(0, MAX_WAIT_SEC, POLL_INTERVAL):
         print("\n✓ Genie finished")
         break
     elif status in ("FAILED", "CANCELLED"):
-        raise RuntimeError(f"Genie ended with status: {status}. Check Genie space.")
-
-    time.sleep(POLL_INTERVAL)
+        raise RuntimeError(f"Genie ended with: {status}")
+    time.sleep(INTERVAL)
 else:
-    raise TimeoutError("Genie did not respond within 5 minutes. Try again.")
+    raise TimeoutError("Genie did not respond in 5 minutes.")
 
 # COMMAND ----------
 
-# MAGIC %md ### Step 3 — Extract SQL from Genie Response
+# MAGIC %md ### Step 4 — Extract SQL
 
 # COMMAND ----------
 
-# ── Extract SQL ───────────────────────────────────────────────────────────────
-GENERATED_SQL = ""
+# ── Extract SQL + explanation ─────────────────────────────────────────────────
 EXPLANATION   = ""
+GENERATED_SQL = ""
 
-# Get explanation / narrative text from Genie attachments
 for att in (GENIE_MSG or {}).get("attachments", []):
     if att.get("type") == "text":
         EXPLANATION = att.get("content", "")
         break
 
-# Primary: get SQL from query-result endpoint
+# Primary: query-result endpoint
 try:
     r = requests.get(
         f"{GENIE_BASE}/conversations/{CONV_ID}/messages/{MSG_ID}/query-result",
         headers=HEADERS, timeout=30
     )
     if r.status_code == 200:
-        stmt         = r.json().get("statement_response", {})
+        stmt          = r.json().get("statement_response", {})
         GENERATED_SQL = stmt.get("statement", "").strip()
 except Exception as e:
-    print(f"query-result not available: {e}")
+    print(f"query-result: {e}")
 
-# Fallback: extract ```sql ... ``` block from explanation text
+# Fallback: SQL block inside explanation
 if not GENERATED_SQL and EXPLANATION:
     m = re.search(r"```sql\n(.*?)```", EXPLANATION, re.DOTALL | re.IGNORECASE)
     if m:
         GENERATED_SQL = m.group(1).strip()
-        print("SQL extracted from explanation text (fallback).")
+        print("SQL extracted from explanation text.")
 
-# Show results
 print("=" * 70)
 print("GENIE EXPLANATION:")
 print(EXPLANATION or "(none)")
 print("=" * 70)
-print("GENERATED SQL:")
-print(GENERATED_SQL if GENERATED_SQL else "(No SQL extracted — see Genie link below)")
+print("GENERATED SQL (first 1000 chars):")
+print((GENERATED_SQL or "(none)")[:1000])
 print("=" * 70)
-print(f"Genie conversation: {GENIE_LINK}")
 
 # COMMAND ----------
 
-# MAGIC %md ### Step 4 — Execute SQL & Show Attrition Waterfall
+# MAGIC %md ### Step 5 — Execute SQL + Waterfall
 
 # COMMAND ----------
 
-# ── Execute SQL ───────────────────────────────────────────────────────────────
-if not GENERATED_SQL:
-    print("No SQL to execute.")
-    print(f"Open Genie to view the full response: {GENIE_LINK}")
-else:
+# ── Run SQL ───────────────────────────────────────────────────────────────────
+STEP_TABLES = []
+
+if GENERATED_SQL:
     print(f"Executing SQL ({len(GENERATED_SQL)} chars)...")
     try:
         result_df = spark.sql(GENERATED_SQL)
         display(result_df)
     except Exception as e:
-        print(f"SQL execution error: {e}")
-        print("Tip: Open Genie and ask it to fix the error.")
-        print(f"Genie: {GENIE_LINK}")
+        print(f"SQL error: {e}")
+        print(f"Open Genie to debug: {GENIE_LINK}")
+
+    # Find temp tables for waterfall
+    STEP_TABLES = re.findall(
+        r"CREATE\s+OR\s+REPLACE\s+TEMPORARY\s+TABLE\s+(\w+)",
+        GENERATED_SQL, re.IGNORECASE
+    )
+else:
+    print("No SQL generated.")
+    print(f"Full response in Genie: {GENIE_LINK}")
 
 # COMMAND ----------
 
 # ── Attrition Waterfall ───────────────────────────────────────────────────────
-if GENERATED_SQL:
-    tables = re.findall(
-        r"CREATE\s+OR\s+REPLACE\s+TEMPORARY\s+TABLE\s+(\w+)",
-        GENERATED_SQL, re.IGNORECASE
+if STEP_TABLES:
+    print(f"\n{'':=<62}")
+    print(f"  ATTRITION WATERFALL — {STUDY_TITLE}")
+    print(f"  Section: {NB_TOPIC or 'Attrition Pipeline'}")
+    print(f"{'':=<62}")
+    print(f"  {'Step':<42} {'N Patients':>12}  {'Drop':>10}")
+    print(f"  {'-'*42} {'-'*12}  {'-'*10}")
+    prev = None
+    for i, tbl in enumerate(STEP_TABLES, 1):
+        try:
+            cnt  = spark.sql(f"SELECT COUNT(*) AS n FROM {tbl}").collect()[0]["n"]
+            drop = f"−{prev - cnt:,}" if prev is not None else "—"
+            print(f"  {i}. {tbl:<40} {cnt:>12,}  {drop:>10}")
+            prev = cnt
+        except Exception as e:
+            print(f"  {i}. {tbl:<40} (error: {e})")
+    print(f"{'':=<62}")
+    if prev is not None:
+        print(f"  Final cohort: {prev:,} patients")
+
+# COMMAND ----------
+
+# MAGIC %md ### Step 6 — Save to Notebook
+
+# COMMAND ----------
+
+# ── Ensure study folder exists ────────────────────────────────────────────────
+requests.post(
+    f"{WS_BASE}/mkdirs",
+    headers=HEADERS,
+    json={"path": STUDY_PATH}
+)
+print(f"Study folder: {STUDY_PATH}")
+
+# COMMAND ----------
+
+# ── Build and push the section notebook ──────────────────────────────────────
+sql_safe = (GENERATED_SQL or "# No SQL generated").replace("\\", "\\\\").replace('"""', "'''")
+
+waterfall_lines = ""
+if STEP_TABLES:
+    waterfall_lines = "\n".join(
+        f'        ("{t}", {i}),' for i, t in enumerate(STEP_TABLES, 1)
     )
 
-    if tables:
-        print(f"\n{'':=<60}")
-        print(f"  ATTRITION WATERFALL — {STUDY_TITLE}")
-        print(f"{'':=<60}")
-        print(f"  {'Step':<42} {'N Patients':>12}  {'Drop':>10}")
-        print(f"  {'-'*42} {'-'*12}  {'-'*10}")
-
-        prev_count = None
-        for i, tbl in enumerate(tables, 1):
-            try:
-                cnt  = spark.sql(f"SELECT COUNT(*) AS n FROM {tbl}").collect()[0]["n"]
-                drop = f"−{prev_count - cnt:,}" if prev_count is not None else "—"
-                print(f"  {i}. {tbl:<40} {cnt:>12,}  {drop:>10}")
-                prev_count = cnt
-            except Exception as e:
-                print(f"  {i}. {tbl:<40} (unavailable: {e})")
-
-        print(f"{'':=<60}")
-        print(f"  Final cohort: {prev_count:,} patients" if prev_count else "")
-    else:
-        print("No temp tables detected in SQL — check the generated SQL above.")
-
-# COMMAND ----------
-
-# MAGIC %md ### Step 5 — Auto-Create Study Notebook
-
-# COMMAND ----------
-
-# ── Build and push study-specific notebook ────────────────────────────────────
-safe_title = re.sub(r"[^a-zA-Z0-9]", "_", STUDY_TITLE).strip("_")[:60]
-NB_PATH    = f"{OUTPUT_FOLDER}/{safe_title}_attrition"
-
-# Escape SQL for embedding inside Python string
-sql_escaped = (GENERATED_SQL or "# No SQL generated — re-run orchestrator") \
-    .replace("\\", "\\\\").replace('"', '\\"')
-
 nb_source = f'''# Databricks notebook source
-# ════════════════════════════════════════════════════════
-# {STUDY_TITLE}
-# Auto-generated by RWE ADS Automation Platform
-# Genie conversation: {GENIE_LINK}
-# ════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
+# Study   : {STUDY_TITLE}
+# Section : {NB_TOPIC or "Attrition Pipeline"}
+# Notebook: {NB_NAME}
+# Genie   : {GENIE_LINK}
+# ════════════════════════════════════════════════════════════════════════
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC # {STUDY_TITLE}
+# MAGIC ## {NB_TOPIC or "Attrition Pipeline"}
 # MAGIC **Study window:** {STUDY_WINDOW}
-# MAGIC **Generated by:** RWE ADS Automation Platform (Genie Agent)
+# MAGIC
 # MAGIC **Genie conversation:** [{GENIE_LINK}]({GENIE_LINK})
+# MAGIC
+# MAGIC *Auto-generated by RWE ADS Automation Platform*
 
 # COMMAND ----------
 
-# Study metadata
+# Section metadata
 STUDY_TITLE  = """{STUDY_TITLE}"""
 STUDY_WINDOW = """{STUDY_WINDOW}"""
+NB_SECTION   = """{NB_TOPIC or "Attrition Pipeline"}"""
 GENIE_LINK   = """{GENIE_LINK}"""
-
-INCLUSION_CRITERIA = {json.dumps(INCLUSION, indent=2)}
-
-EXCLUSION_CRITERIA = {json.dumps(EXCLUSION, indent=2)}
-
-CODE_LISTS = {json.dumps(CODE_LISTS, indent=2)}
-
-print(f"Study  : {{STUDY_TITLE}}")
-print(f"Window : {{STUDY_WINDOW}}")
 
 # COMMAND ----------
 
 # MAGIC %md ### Genie Explanation
 # MAGIC
-# MAGIC {EXPLANATION.replace(chr(10), chr(10) + "# MAGIC ") if EXPLANATION else "_No explanation captured._"}
+# MAGIC {EXPLANATION.replace(chr(10), chr(10) + "# MAGIC ") if EXPLANATION else "_No explanation text captured._"}
 
 # COMMAND ----------
 
 # Attrition SQL — generated by Genie Agent
-# Do not edit manually. Re-run the orchestrator to regenerate.
+# Re-run orchestrator to regenerate or continue conversation in Genie.
 
 {GENERATED_SQL or "# No SQL was captured — re-run 00_ADS_Orchestrator"}
 
 # COMMAND ----------
 
-# Attrition Waterfall — patient counts at each step
-import re
+# Attrition Waterfall
+import re as _re
 
-tables = re.findall(
+_sql = """{sql_safe[:8000]}"""
+_tables = _re.findall(
     r"CREATE\\s+OR\\s+REPLACE\\s+TEMPORARY\\s+TABLE\\s+(\\w+)",
-    """{sql_escaped}""",
-    re.IGNORECASE
+    _sql, _re.IGNORECASE
 )
 
-if tables:
+if _tables:
     print(f"\\n{{\'=\'*60}}")
-    print(f"  ATTRITION WATERFALL — {STUDY_TITLE}")
+    print(f"  WATERFALL — {STUDY_TITLE} / {NB_TOPIC or 'Attrition'}")
     print(f"{{\'=\'*60}}")
-    prev = None
-    for i, t in enumerate(tables, 1):
+    _prev = None
+    for _i, _t in enumerate(_tables, 1):
         try:
-            cnt  = spark.sql(f"SELECT COUNT(*) AS n FROM {{t}}").collect()[0]["n"]
-            drop = f"−{{prev - cnt:,}}" if prev else "—"
-            print(f"  {{i}}. {{t:<40}} {{cnt:>12,}}  {{drop}}")
-            prev = cnt
-        except Exception as e:
-            print(f"  {{i}}. {{t:<40}} (unavailable: {{e}})")
-    if prev:
-        print(f"\\n  Final cohort: {{prev:,}} patients")
+            _cnt  = spark.sql(f"SELECT COUNT(*) AS n FROM {{_t}}").collect()[0]["n"]
+            _drop = f"−{{_prev - _cnt:,}}" if _prev is not None else "—"
+            print(f"  {{_i}}. {{_t:<40}} {{_cnt:>12,}}  {{_drop}}")
+            _prev = _cnt
+        except Exception as _e:
+            print(f"  {{_i}}. {{_t:<40}} (error: {{_e}})")
+    if _prev is not None:
+        print(f"\\n  Final: {{_prev:,}} patients")
 else:
-    print("No temp tables found. Check the SQL cell above.")
+    print("No temp tables in SQL. Check the SQL cell above.")
 '''
 
-# Ensure output folder exists
-requests.post(f"{HOST}/api/2.0/workspace/mkdirs", headers=HEADERS,
-              json={"path": OUTPUT_FOLDER})
-
-# Push notebook
 encoded = base64.b64encode(nb_source.encode("utf-8")).decode("ascii")
 r = requests.post(
     f"{WS_BASE}/import",
@@ -403,8 +505,10 @@ r = requests.post(
 )
 r.raise_for_status()
 
-NB_URL = f"{HOST}/#workspace{NB_PATH}"
-print(f"✓ Study notebook created: {NB_PATH}")
+NB_URL     = f"{HOST}/#workspace{NB_PATH}"
+FOLDER_URL = f"{HOST}/#workspace{STUDY_PATH}"
+
+print(f"✓ Notebook saved: {NB_PATH}")
 
 # COMMAND ----------
 
@@ -412,37 +516,69 @@ print(f"✓ Study notebook created: {NB_PATH}")
 
 # COMMAND ----------
 
-# ── Summary + clickable links ─────────────────────────────────────────────────
+# ── Summary card ─────────────────────────────────────────────────────────────
 displayHTML(f"""
-<div style="font-family:Inter,sans-serif;padding:24px;background:#f9f8f6;
-            border-radius:12px;border-left:5px solid #eb1700;max-width:700px;">
-  <div style="font-size:0.65rem;font-weight:800;letter-spacing:0.2em;
-              text-transform:uppercase;color:#eb1700;margin-bottom:12px;">
+<div style="font-family:Inter,sans-serif;padding:28px 32px;background:#f9f8f6;
+            border-radius:14px;border-left:6px solid #eb1700;max-width:740px;
+            box-shadow:0 2px 12px rgba(0,0,0,0.07);">
+
+  <div style="font-size:0.6rem;font-weight:800;letter-spacing:0.22em;
+              text-transform:uppercase;color:#eb1700;margin-bottom:10px;">
     ADS Automation Complete
   </div>
-  <div style="font-size:1.2rem;font-weight:700;color:#1a1410;margin-bottom:6px;">
+
+  <div style="font-size:1.25rem;font-weight:800;color:#1a1410;margin-bottom:4px;">
     {STUDY_TITLE}
   </div>
-  <div style="font-size:0.85rem;color:#81766f;margin-bottom:20px;">
-    {len(INCLUSION)} inclusion steps &nbsp;·&nbsp;
-    {len(EXCLUSION)} exclusion steps &nbsp;·&nbsp;
-    {len(CODE_LISTS)} code groups &nbsp;·&nbsp;
-    {STUDY_WINDOW}
+  <div style="font-size:0.95rem;font-weight:600;color:#eb1700;margin-bottom:12px;">
+    {NB_TOPIC or "Attrition Pipeline"}
   </div>
-  <div style="display:flex;gap:12px;flex-wrap:wrap;">
+  <div style="font-size:0.82rem;color:#81766f;margin-bottom:22px;
+              font-family:'Roboto Mono',monospace;">
+    {NB_NAME} &nbsp;·&nbsp; {len(STEP_TABLES)} steps &nbsp;·&nbsp; {STUDY_WINDOW}
+  </div>
+
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:22px;">
     <a href="{NB_URL}" target="_blank"
-       style="background:#eb1700;color:#fff;padding:10px 20px;border-radius:6px;
+       style="background:#eb1700;color:#fff;padding:10px 22px;border-radius:7px;
               text-decoration:none;font-weight:700;font-size:0.85rem;">
-      📓 Open Study Notebook →
+      📓 Open This Notebook →
+    </a>
+    <a href="{FOLDER_URL}" target="_blank"
+       style="background:#1a1410;color:#fff;padding:10px 22px;border-radius:7px;
+              text-decoration:none;font-weight:700;font-size:0.85rem;">
+      📁 Open Study Folder →
     </a>
     <a href="{GENIE_LINK}" target="_blank"
-       style="background:#0f68b2;color:#fff;padding:10px 20px;border-radius:6px;
+       style="background:#0f68b2;color:#fff;padding:10px 22px;border-radius:7px;
               text-decoration:none;font-weight:700;font-size:0.85rem;">
-      🤖 Open in Genie →
+      🤖 Continue in Genie →
     </a>
   </div>
-  <div style="margin-top:16px;font-size:0.72rem;color:#a39992;">
-    Notebook path: {NB_PATH}
+
+  <div style="background:#ffffff;border:1px solid #eae8e5;border-radius:8px;
+              padding:14px 18px;font-size:0.78rem;color:#1a1410;line-height:1.9;">
+    <div style="font-weight:800;letter-spacing:0.1em;text-transform:uppercase;
+                font-size:0.6rem;color:#81766f;margin-bottom:8px;">
+      Next Generation → New Notebook
+    </div>
+    <div>1. Copy this conversation ID:</div>
+    <div style="font-family:'Roboto Mono',monospace;background:#f5f4f2;
+                padding:6px 10px;border-radius:4px;margin:6px 0 10px 0;
+                color:#eb1700;font-weight:700;font-size:0.82rem;">
+      {CONV_ID}
+    </div>
+    <div>2. Paste it in the <strong>Conversation ID</strong> widget</div>
+    <div>3. Set <strong>Prompt</strong> to:
+         <code style="background:#f5f4f2;padding:2px 6px;border-radius:3px;">
+           /new: feasibility analysis  →  Your next question for Genie here
+         </code>
+    </div>
+    <div>4. Click <strong>Run All</strong></div>
+  </div>
+
+  <div style="margin-top:14px;font-size:0.68rem;color:#a39992;">
+    Folder: {STUDY_PATH}
   </div>
 </div>
 """)
