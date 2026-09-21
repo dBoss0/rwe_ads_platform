@@ -32,12 +32,14 @@
 # MAGIC # 🏥 RWE ADS Automation — Multi-Notebook Orchestrator
 # MAGIC ### Each `/new:` command → new numbered notebook in your study folder
 # MAGIC ---
-# MAGIC | Widget | Purpose |
-# MAGIC |--------|---------|
-# MAGIC | **Study Title** | Names the study folder — keep it the same across runs |
-# MAGIC | **Prompt** | What to ask Genie. Start with `/new: name` for a new notebook |
-# MAGIC | **Conversation ID** | Paste from previous run to continue same Genie chat |
-# MAGIC | **Inclusion / Exclusion / Code Lists** | Only needed on first run |
+# MAGIC | Widget | Required? | Purpose |
+# MAGIC |--------|-----------|---------|
+# MAGIC | **Study Title** | Always | Display name shown in notebook headers and waterfall |
+# MAGIC | **Study Window** | Always | Date range sent to Genie (e.g. `January 2019 to December 2023`) |
+# MAGIC | **Notebook Folder Path** | Optional | Full Databricks path where all study notebooks are saved, e.g. `/Shared/oncology/lung_cancer_2024`. Leave blank → auto-created under `/Shared/{Study Title}` |
+# MAGIC | **Conversation ID** | Optional | Paste from a previous run to continue the same Genie conversation |
+# MAGIC | **Prompt** | Always | What to ask Genie. Start with `/new: <topic>` to route to a new notebook |
+# MAGIC | **Inclusion / Exclusion / Code Lists** | First run only | Study criteria — Genie remembers them via Conversation ID after the first run |
 
 # COMMAND ----------
 
@@ -47,22 +49,29 @@ dbutils.widgets.removeAll()
 dbutils.widgets.text(
     "study_title",
     "My Study Title",
-    "Study Title  (kept the same across all runs — becomes the folder name)"
+    "Study Title  (display name — used in notebook headers and summary)"
 )
 dbutils.widgets.text(
     "study_window",
     "January 2019 to December 2023",
-    "Study Window  (date range, e.g. January 2019 to December 2023)"
+    "Study Window  (e.g. January 2019 to December 2023)"
 )
 dbutils.widgets.text(
     "conversation_id",
     "",
     "Genie Conversation ID  (blank = start new conversation)"
 )
+
+# ── Folder path ──────────────────────────────────────────────────────────────
+# Full Databricks workspace path where all notebooks for this study are saved.
+# Examples:  /Shared/oncology/lung_cancer_2024
+#            /Users/jane.smith@company.com/studies/rheumatoid_arthritis
+#            /Repos/my-team/rwe-studies/knee_replacement
+# Leave blank → falls back to /Shared/{sanitized Study Title}
 dbutils.widgets.text(
-    "output_root",
-    "/Shared/ads_automation/studies",
-    "Output Root Folder"
+    "folder_path",
+    "",
+    "Notebook Folder Path  (full Databricks path — leave blank to auto-create under /Shared)"
 )
 
 dbutils.widgets.text(
@@ -100,7 +109,7 @@ import json, re, requests, time, base64
 STUDY_TITLE    = dbutils.widgets.get("study_title").strip()
 STUDY_WINDOW   = dbutils.widgets.get("study_window").strip()
 CONV_ID_IN     = dbutils.widgets.get("conversation_id").strip()
-OUTPUT_ROOT    = dbutils.widgets.get("output_root").strip().rstrip("/")
+FOLDER_PATH    = dbutils.widgets.get("folder_path").strip().rstrip("/")
 RAW_PROMPT     = dbutils.widgets.get("prompt").strip()
 INCLUSION      = json.loads(dbutils.widgets.get("inclusion_criteria"))
 EXCLUSION      = json.loads(dbutils.widgets.get("exclusion_criteria"))
@@ -116,11 +125,17 @@ GENIE_BASE = f"{HOST}/api/2.0/genie/spaces/{GENIE_SPACE_ID}"
 WS_BASE    = f"{HOST}/api/2.0/workspace"
 HEADERS    = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
 
-# Study folder path
-safe_study = re.sub(r"[^a-zA-Z0-9]", "_", STUDY_TITLE).strip("_")[:60]
-STUDY_PATH = f"{OUTPUT_ROOT}/{safe_study}"
+# ── Resolve study folder path ─────────────────────────────────────────────────
+# If the user gave a path → use it directly.
+# If blank → auto-create under /Shared using the study title.
+if FOLDER_PATH:
+    STUDY_PATH = FOLDER_PATH
+else:
+    safe_title = re.sub(r"[^a-zA-Z0-9]", "_", STUDY_TITLE).strip("_")[:60]
+    STUDY_PATH = f"/Shared/{safe_title}"
 
-print(f"Study folder : {STUDY_PATH}")
+print(f"Study title  : {STUDY_TITLE}")
+print(f"Notebook folder : {STUDY_PATH}")
 print(f"Host         : {HOST}")
 
 # COMMAND ----------
