@@ -70,6 +70,11 @@ dbutils.widgets.text(
     "",
     "Message ID  (optional — blank = auto-detect latest SQL from conversation)"
 )
+dbutils.widgets.text(
+    "genie_space_id",
+    "",
+    "Genie Space ID  (from URL: /genie/rooms/ ► THIS PART ◄ /chats/...)"
+)
 
 print("Widgets ready.")
 
@@ -78,11 +83,12 @@ print("Widgets ready.")
 # ── Imports & auth ────────────────────────────────────────────────────────────
 import json, re, requests, base64
 
-CONV_ID     = dbutils.widgets.get("conversation_id").strip()
-STUDY_TITLE = dbutils.widgets.get("study_title").strip()
-FOLDER_PATH = dbutils.widgets.get("folder_path").strip().rstrip("/")
-NB_NAME     = dbutils.widgets.get("notebook_name").strip()
-MSG_ID_IN   = dbutils.widgets.get("message_id").strip()
+CONV_ID        = dbutils.widgets.get("conversation_id").strip()
+STUDY_TITLE    = dbutils.widgets.get("study_title").strip()
+FOLDER_PATH    = dbutils.widgets.get("folder_path").strip().rstrip("/")
+NB_NAME        = dbutils.widgets.get("notebook_name").strip()
+MSG_ID_IN      = dbutils.widgets.get("message_id").strip()
+GENIE_SPACE_ID = dbutils.widgets.get("genie_space_id").strip()
 
 if not CONV_ID:
     raise ValueError("Conversation ID is required. Copy it from the Genie URL.")
@@ -90,8 +96,8 @@ if not FOLDER_PATH:
     raise ValueError("Notebook Folder Path is required. E.g. /Shared/oncology/my_study")
 if not NB_NAME:
     raise ValueError("Notebook Name is required. E.g. 01_attrition_pipeline")
-
-GENIE_SPACE_ID = "01f1ad05e9a811de88b3f1c49399c3c1"
+if not GENIE_SPACE_ID:
+    raise ValueError("Genie Space ID is required. Copy it from /genie/rooms/ ► HERE ◄ /chats/...")
 
 ctx     = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
 TOKEN   = ctx.apiToken().get()

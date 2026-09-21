@@ -98,6 +98,11 @@ dbutils.widgets.text(
     '[{"condition": "Condition Name", "coding_system": "ICD-10-PCS", "codes": ["CODE1", "CODE2"]}]',
     "Code Lists  (JSON array — first run only)"
 )
+dbutils.widgets.text(
+    "genie_space_id",
+    "",
+    "Genie Space ID  (from URL: /genie/rooms/ ► THIS PART ◄ /chats/...)"
+)
 
 print("Widgets ready.")
 
@@ -114,8 +119,7 @@ RAW_PROMPT     = dbutils.widgets.get("prompt").strip()
 INCLUSION      = json.loads(dbutils.widgets.get("inclusion_criteria"))
 EXCLUSION      = json.loads(dbutils.widgets.get("exclusion_criteria"))
 CODE_LISTS     = json.loads(dbutils.widgets.get("code_lists"))
-
-GENIE_SPACE_ID = "01f1ad05e9a811de88b3f1c49399c3c1"
+GENIE_SPACE_ID = dbutils.widgets.get("genie_space_id").strip()
 
 ctx   = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
 TOKEN = ctx.apiToken().get()
